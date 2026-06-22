@@ -19,6 +19,7 @@ import config from "@/config";
 import { ToolModel } from "@/models";
 // Import all groups
 import { toolEntries as agentToolEntries, tools as agentTools } from "./agents";
+import { toolEntries as apiToolEntries, tools as apiTools } from "./api";
 import {
   toolEntries as appDataToolEntries,
   tools as appDataTools,
@@ -94,6 +95,7 @@ const toolEntries: Partial<
   Record<ArchestraToolFullName, ArchestraRuntimeToolEntry>
 > = {
   ...identityToolEntries,
+  ...apiToolEntries,
   ...agentToolEntries,
   ...llmProxyToolEntries,
   ...mcpGatewayToolEntries,
@@ -134,6 +136,7 @@ const projectGatedSandboxFullNames = new Set<string>([
 export function getArchestraMcpTools() {
   const tools = [
     ...identityTools,
+    ...apiTools,
     ...agentTools,
     ...llmProxyTools,
     ...mcpGatewayTools,
