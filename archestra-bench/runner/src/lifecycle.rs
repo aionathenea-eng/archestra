@@ -160,6 +160,7 @@ pub struct Instance {
     db_created: Arc<Mutex<bool>>,
     platform: PathBuf,
     env: HashMap<String, String>,
+    extra_backend_env: HashMap<String, String>,
     maint_db_url: String,
     db_url: String,
     db_managed: bool,
@@ -197,6 +198,7 @@ impl Instance {
             db_created: Arc::new(Mutex::new(false)),
             platform,
             env: HashMap::new(),
+            extra_backend_env: HashMap::new(),
             maint_db_url: String::new(),
             db_url: String::new(),
             db_managed: true,
@@ -205,6 +207,12 @@ impl Instance {
             bench_compose,
             teardown_id: None,
         }
+    }
+
+    /// Extra env vars (an env's `[backend_env]` table) injected into the backend process on top of the
+    /// inherited process env and `.env`. Set before [`start`]; backend feature flags travel this way.
+    pub fn set_backend_env(&mut self, extra: HashMap<String, String>) {
+        self.extra_backend_env = extra;
     }
 
     pub async fn start(&mut self) -> Result<(), LifecycleError> {
@@ -435,6 +443,7 @@ impl Instance {
     fn backend_env(&self) -> HashMap<String, String> {
         build_backend_env(
             &self.env,
+            &self.extra_backend_env,
             &self.db_url,
             &self.base_url,
             self.metrics_port,
@@ -596,6 +605,7 @@ pub fn redacted_db_location(db_url: &str) -> String {
 
 pub fn build_backend_env(
     base_env: &HashMap<String, String>,
+    extra_env: &HashMap<String, String>,
     db_url: &str,
     api_base_url: &str,
     metrics_port: u16,
@@ -603,6 +613,9 @@ pub fn build_backend_env(
 ) -> HashMap<String, String> {
     let mut env: HashMap<String, String> = std::env::vars().collect();
     env.extend(base_env.iter().map(|(k, v)| (k.clone(), v.clone())));
+    // An env's `[backend_env]` overrides inherited/`.env` values but not the bench-controlled keys
+    // force-set below (db url, dagger host, etc.) -- those keys aren't ones an env should steer.
+    env.extend(extra_env.iter().map(|(k, v)| (k.clone(), v.clone())));
     env.entry("ARCHESTRA_AUTH_SECRET".to_string())
         .or_insert_with(|| DEV_AUTH_SECRET.to_string());
     env.insert("ARCHESTRA_DATABASE_URL".to_string(), db_url.to_string());
@@ -752,7 +765,15 @@ mod tests {
         // No process-env override → the dev defaults stand (the `.env` base map cannot steer these two,
         // so they are force-set; the override path swaps the default for a process-env value).
         let base = HashMap::new();
-        let env = build_backend_env(&base, "postgres://h/db", "http://localhost:1", 2, "/dev/dagger");
+        let extra = HashMap::new();
+        let env = build_backend_env(
+            &base,
+            &extra,
+            "postgres://h/db",
+            "http://localhost:1",
+            2,
+            "/dev/dagger",
+        );
         assert_eq!(
             env.get("ARCHESTRA_CODE_RUNTIME_DAGGER_RUNNER_HOST"),
             Some(&DAGGER_RUNNER_HOST.to_string())
@@ -760,6 +781,24 @@ mod tests {
         assert_eq!(
             env.get("ARCHESTRA_CODE_RUNTIME_DAGGER_CLI_BIN"),
             Some(&"/dev/dagger".to_string())
+        );
+    }
+
+    #[test]
+    fn test_build_backend_env_injects_extra() {
+        let base = HashMap::new();
+        let extra = HashMap::from([("ARCHESTRA_APPS_ENABLED".to_string(), "true".to_string())]);
+        let env = build_backend_env(
+            &base,
+            &extra,
+            "postgres://h/db",
+            "http://localhost:1",
+            2,
+            "/dev/dagger",
+        );
+        assert_eq!(
+            env.get("ARCHESTRA_APPS_ENABLED"),
+            Some(&"true".to_string())
         );
     }
 
